@@ -105,6 +105,7 @@ We can remove twitter words and stopwords using `tokens_remove()`:
 
 ```{r}
 toks_stop <- tokens_remove(toks_stem, stopwords("english"))
+?tokens_remove
 
 dfm_stop <- dfm(toks_stop)
 textplot_wordcloud(dfm_stop, rotation=0, min_size=.5, max_size=5, max_words=20)
@@ -152,7 +153,7 @@ pred_min <- predict(mod, labeled[-tr,], s="lambda.min", type="class")
 mean(pred_min == labeled$attack[-tr])
 
 lam_1se <- which(mod$lambda == mod$lambda.1se)
-pred_1se <- predict(mod, labeled[-tr,], s="lambda.min", type="class")
+pred_1se <- predict(mod, labeled[-tr,], s="lambda.1se", type="class")
 mean(pred_1se == labeled$attack[-tr])
 ```
 
@@ -160,6 +161,7 @@ We can also examine the confusion matrix to get a better idea of the error.
 
 ```{r}
 table(pred_min, labeled$attack[-tr])
+table(pred_1se, labeled$attack[-tr])
 ```
 
 Using the model we have identified with the minimum CV error, we can also look at the largest and smallest coefficient estimates and the features associated with them. 
