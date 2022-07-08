@@ -240,7 +240,7 @@ dfm <- readRDS(paste(N, "_dtm.rds", sep=""))
 tr <- sample(1:N, floor(N*.8)) # indexes for training data
 
 registerDoMC(cores=5) # trains all 5 folds in parallel (at once rather than one by one)
-mod <- cv.glmnet(dfm[tr,], dfm$sentiment[tr],
+mod <- cv.glmnet(dfm_subset(dfm, tr), dfm_subset(dfm, tr)$sentiment,
                  nfolds=5, parallel=TRUE, family="binomial")
 ```
 
