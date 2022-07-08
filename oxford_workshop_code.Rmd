@@ -237,10 +237,12 @@ Below is starter code to help you properly train a lasso model using the `.rds` 
 N <- 12500
 
 dfm <- readRDS(paste(N, "_dtm.rds", sep=""))
-tr <- sample(1:N, floor(N*.8)) # indexes for training data
+dfm$id <- 1:nrow(dfm)
+tr <- sample(dfm$id, floor(nrow(dfm)*.8)) # indexes for training data
 
 registerDoMC(cores=5) # trains all 5 folds in parallel (at once rather than one by one)
-mod <- cv.glmnet(dfm_subset(dfm, tr), dfm_subset(dfm, tr)$sentiment,
+
+mod <- cv.glmnet(dfm_subset(dfm, id %in% tr), dfm_subset(dfm, id %in% tr)$sentiment,
                  nfolds=5, parallel=TRUE, family="binomial")
 ```
 
