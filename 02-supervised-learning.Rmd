@@ -1,0 +1,194 @@
+---
+title: "Supervised machine learning"
+date: |
+  | `r format(Sys.time(), '%d %B %Y')`
+output: html_document
+---
+
+### Regularized regression
+
+To learn how to build a supervised machine learning model, we will use a random sample of nearly 5,000 tweets mentioning the names of the candidates to the 2014 EP elections in the UK. We will be analyzing a variable named `communication`, which indicates whether each tweet was hand-coded as being __engaging__ (a tweet that tries to engage with the audience of the account) or __broadcasting__ (just sending a message, without trying to elicit a response).
+
+The source of the dataset is an article co-authored with Yannis Theocharis, Zoltan Fazekas, and Sebastian Popa, published in the Journal of Communication. The link is [here](http://onlinelibrary.wiley.com/doi/10.1111/jcom.12259/abstract). Our goal was to understand to what extent candidates are not engaging voters on Twitter because they're exposed to mostly impolite messages.
+
+Let's start by reading the dataset and creating a dummy variable indicating whether each tweet is engaging
+
+```{r}
+library(quanteda)
+download.file('https://github.com/lse-my459/pset_data/raw/master/UK-tweets.csv', 'UK-tweets.csv')
+tweets <- read.csv("UK-tweets.csv", stringsAsFactors=F)
+tweets$engaging <- ifelse(tweets$communication=="engaging", 1, 0)
+tweets <- tweets[!is.na(tweets$engaging),]
+```
+
+We'll do some cleaning as well -- substituting handles with @. Why? We want to prevent overfitting.
+
+```{r}
+tweets$text <- gsub('@[0-9_A-Za-z]+', '@', tweets$text)
+```
+
+As we have discussed multiple times in the course, before we can do any type of automated text analysis, we will need to go through several "preprocessing" steps before it can be passed to a statistical model. 
+
+```{r}
+twcorpus <- corpus(tweets$text)
+summary(twcorpus[1:10])
+```
+
+We can then convert a corpus into a document-feature matrix using the dfm function. We will then trim it in order to keep only tokens that appear in 2 or more tweets. Note that we keep punctuation -- it turns out it can be quite informative.
+
+
+```{r}
+toks <- tokens_ngrams(tokens(twcorpus), n = 1:2)
+twdfm <- dfm(toks, remove_url=TRUE, 
+            verbose=TRUE)
+twdfm <- dfm_remove(twdfm, stopwords("english"))
+twdfm <- dfm_trim(twdfm, min_docfreq = 2, verbose=TRUE)
+```
+
+Once we have the DFM, we split it into training and test set. We'll go with 80% training and 20% set. Note the use of a random seed to make sure our results are replicable:
+
+```{r}
+set.seed(123)
+training <- sample(1:nrow(tweets), floor(.80 * nrow(tweets)))
+test <- (1:nrow(tweets))[1:nrow(tweets) %in% training == FALSE]
+```
+
+Our first step is to train the classifier using cross-validation. There are many packages in R to run machine learning models. For regularized regression, glmnet is in my opinion the best. It's much faster than caret or mlr (in my experience at least), and it has cross-validation already built-in, so we don't need to code it from scratch. We'll start with a ridge regression:
+
+```{r}
+library(glmnet)
+require(doMC)
+registerDoMC(cores=3) #functions for parallel execution of R code on machines with multiple cores or processors
+ridge <- cv.glmnet(twdfm[training,], tweets$engaging[training], 
+	family="binomial", alpha=0, nfolds=5, parallel=TRUE, intercept=TRUE,
+	type.measure="class")
+plot(ridge)
+```
+
+We can now compute the performance metrics on the test set.
+```{r}
+## function to compute accuracy
+accuracy <- function(ypred, y){
+	tab <- table(ypred, y)
+	return(sum(diag(tab))/sum(tab))
+}
+# function to compute precision
+precision <- function(ypred, y){
+	tab <- table(ypred, y)
+	return((tab[2,2])/(tab[2,1]+tab[2,2]))
+}
+# function to compute recall
+recall <- function(ypred, y){
+	tab <- table(ypred, y)
+	return(tab[2,2]/(tab[1,2]+tab[2,2]))
+}
+# computing predicted values
+preds <- predict(ridge, twdfm[test,], type="class")
+# confusion matrix
+table(preds, tweets$engaging[test])
+# performance metrics
+accuracy(preds, tweets$engaging[test])
+# for specific rows
+precision(preds==1, tweets$engaging[test]==1)
+recall(preds==1, tweets$engaging[test]==1)
+precision(preds==0, tweets$engaging[test]==0)
+recall(preds==0, tweets$engaging[test]==0)
+```
+
+Something that is often very useful is to look at the actual estimated coefficients and see which of these have the highest or lowest values:
+
+```{r}
+# from the different values of lambda, let's pick the highest one that is
+# within one standard error of the best one (why? see "one-standard-error"
+# rule -- maximizes parsimony)
+best.lambda <- which(ridge$lambda==ridge$lambda.1se)
+beta <- ridge$glmnet.fit$beta[,best.lambda]
+head(beta, 20)
+
+## identifying predictive features
+df <- data.frame(coef = as.numeric(beta),
+				word = names(beta), stringsAsFactors=F)
+
+df <- df[order(df$coef),]
+head(df[,c("coef", "word")], n=30)
+paste(df$word[1:30], collapse=", ")
+df <- df[order(df$coef, decreasing=TRUE),]
+head(df[,c("coef", "word")], n=30)
+paste(df$word[1:30], collapse=", ")
+```
+
+We can easily modify our code to experiment with Lasso or ElasticNet models:
+
+```{r}
+lasso <- cv.glmnet(twdfm[training,], tweets$engaging[training], 
+	family="binomial", alpha=1, nfolds=5, parallel=TRUE, intercept=TRUE,
+	type.measure="class")
+
+```
+
+```{r}
+# computing predicted values
+preds <- predict(lasso, twdfm[test,], type="class")
+# confusion matrix
+table(preds, tweets$engaging[test])
+# performance metrics (slightly better!)
+accuracy(preds, tweets$engaging[test])
+precision(preds==1, tweets$engaging[test]==1)
+recall(preds==1, tweets$engaging[test]==1)
+precision(preds==0, tweets$engaging[test]==0)
+recall(preds==0, tweets$engaging[test]==0)
+
+```
+
+```{r}
+best.lambda <- which(lasso$lambda==lasso$lambda.1se)
+beta <- lasso$glmnet.fit$beta[,best.lambda]
+head(beta)
+
+## identifying predictive features
+df <- data.frame(coef = as.numeric(beta),
+				word = names(beta), stringsAsFactors=F)
+
+df <- df[order(df$coef),]
+head(df[,c("coef", "word")], n=30)
+
+df <- df[order(df$coef, decreasing=TRUE),]
+head(df[,c("coef", "word")], n=30)
+```
+
+We now see that the coefficients for some features actually became zero.
+
+```{r}
+enet <- cv.glmnet(twdfm[training,], tweets$engaging[training], 
+	family="binomial", alpha=0.50, nfolds=5, parallel=TRUE, intercept=TRUE,
+	type.measure="class")
+# NOTE: this will not cross-validate across values of alpha
+
+# computing predicted values
+preds <- predict(enet, twdfm[test,], type="class")
+# confusion matrix
+table(preds, tweets$engaging[test])
+# performance metrics
+accuracy(preds, tweets$engaging[test])
+precision(preds==1, tweets$engaging[test]==1)
+recall(preds==1, tweets$engaging[test]==1)
+precision(preds==0, tweets$engaging[test]==0)
+recall(preds==0, tweets$engaging[test]==0)
+
+
+best.lambda <- which(enet$lambda==enet$lambda.1se)
+beta <- enet$glmnet.fit$beta[,best.lambda]
+head(beta)
+
+## identifying predictive features
+df <- data.frame(coef = as.numeric(beta),
+				word = names(beta), stringsAsFactors=F)
+
+df <- df[order(df$coef),]
+head(df[,c("coef", "word")], n=30)
+
+df <- df[order(df$coef, decreasing=TRUE),]
+head(df[,c("coef", "word")], n=30)
+
+```
+
